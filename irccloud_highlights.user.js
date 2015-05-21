@@ -14,19 +14,39 @@
 // ==/UserScript==
 
 (function() {
+  var Child = null;
+  var ChildView = null;
+  var ChildStatusView = null;
+  var BufferListChildView = null;
 
-  function init() {
+  function gotAllTypes() {
+    return Child && ChildView && ChildStatusView && BufferListChildView;
+  }
+
+  function tryGetTypes() {
     // Yank out some types. This would be a lot easier if the original
     // modules were exposed via webpack!
-    var b = SESSION.buffers.first();
-    var Child = b.__proto__.__proto__.constructor;
-    var v = SESSIONVIEW.mainArea.buffers[b.id];
-    var ChildView = v.__proto__.__proto__.constructor;
-    var ChildStatusView = v.status.__proto__.__proto__.constructor;
-    var blcv = _.values(SESSIONVIEW.sidebar.bufferList.connections)[0];
-    var blv = _.filter(blcv.buffers, function (v) { return v.el.classList.contains("channel"); })[0];
-    var BufferListChildView = blv.__proto__.__proto__.constructor;
+    if (SESSION.buffers.length > 0) {
+      var b = SESSION.buffers.first();
+      Child = b.__proto__.__proto__.constructor;
+      var v = SESSIONVIEW.mainArea.buffers[b.id];
+      ChildView = v.__proto__.__proto__.constructor;
+      ChildStatusView = v.status.__proto__.__proto__.constructor;
+    }
+    var bufconns = _.values(SESSIONVIEW.sidebar.bufferList.connections);
+    if (bufconns.length > 0) {
+      var blcv = bufconns[0];
+      var chanviews = _.filter(blcv.buffers, function (v) { return v.el.classList.contains("channel"); });
+      if (chanviews.length > 0) {
+        var blv = chanviews[0];
+        BufferListChildView = blv.__proto__.__proto__.constructor;
+      }
+    }
+    return gotAllTypes();
+  }
 
+  function init() {
+    console.log('highlights: init');
     var ma = SESSIONVIEW.mainArea;
     ma.model.buffers.unbind('add', ma.renderBuffer, ma);
     function renderBuffer(buffer) {
@@ -65,7 +85,6 @@
         this.bindMessageHandlers();
       },
       bindMessageHandlers: function () {
-        console.log('Highlights.bindMessageHandlers');
         for (var type in this.message_handlers) {
           this.connection.buffers.bind('notableMessage:' + type, this.handleMessage, this);
         }
@@ -142,14 +161,21 @@
     SESSION.connections.bind('add', addHighlights);
   }
 
+  function tryInit() {
+    if (gotAllTypes() || tryGetTypes()) {
+      init();
+    } else {
+      // Try again later, I guess.
+      window.setTimeout(tryInit, 100);
+    }
+  }
+
   (function checkSession() {
     if (window.hasOwnProperty('SESSION')) {
-      if (window.SESSION.initialized) {
-        init();
+      if (window.SESSION.streamConnected) {
+        tryInit();
       } else {
-        window.SESSION.bind('init', function () {
-          init();
-        });
+        window.SESSION.once('streamConnectedChange', tryInit);
       }
     } else {
       window.setTimeout(checkSession, 100);
